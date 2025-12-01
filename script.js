@@ -26,11 +26,19 @@ let currentFilter = 'all';
 // ========== DATA STRUCTURES ==========
 
 // Object - represents a single task
-const createTask = (text) => ({
+const createTask = (text, timerSeconds = 0) => ({
     id: ++taskId,
     text: text,
     completed: false,
-    createdAt: new Date()
+    createdAt: new Date(),
+    // timerSeconds: original duration in seconds (0 = none)
+    timerSeconds: timerSeconds,
+    // timerRemainingSeconds: remaining seconds when paused or initial value
+    timerRemainingSeconds: timerSeconds,
+    // timerEnd: timestamp (ms) when timer should expire, null if not running
+    timerEnd: timerSeconds > 0 ? Date.now() + timerSeconds * 1000 : null,
+    // incomplete: becomes true when timer expires while task is not completed
+    incomplete: false
 });
 
 // ========== LOCALSTORAGE EXAMPLES ==========
@@ -44,6 +52,17 @@ const loadTasks = () => {
         if (stored) {
             // Parse JSON string back to object
             tasks = JSON.parse(stored);
+            // Normalize older items that may not have timer fields
+            tasks = tasks.map(t => ({
+                id: t.id,
+                text: t.text,
+                completed: !!t.completed,
+                createdAt: t.createdAt ? new Date(t.createdAt) : new Date(),
+                timerSeconds: t.timerSeconds || 0,
+                timerRemainingSeconds: typeof t.timerRemainingSeconds !== 'undefined' ? t.timerRemainingSeconds : (t.timerSeconds || 0),
+                timerEnd: t.timerEnd || null,
+                incomplete: !!t.incomplete
+            }));
             
             // Find the highest ID to continue from there
             if (tasks.length > 0) {
@@ -141,9 +160,15 @@ const addTask = (text) => {
     }
     
     // Add task to array
-    tasks.push(createTask(trimmedText));
+    // Read timer minutes input (user-set). Convert minutes to seconds.
+    const minutes = parseInt($('#taskTimer').val(), 10) || 0;
+    const seconds = minutes > 0 ? minutes * 60 : 0;
+
+    tasks.push(createTask(trimmedText, seconds));
     saveTasks();
     clearFormError('taskInput');
+    // clear timer input after adding
+    $('#taskTimer').val('');
     return true;
 };
 
@@ -158,6 +183,13 @@ const toggleTask = (id) => {
     const task = tasks.find(task => task.id === id);
     if (task) {
         task.completed = !task.completed;
+        // If user completes a task, clear incomplete flag
+        if (task.completed) {
+            task.incomplete = false;
+            task.timerEnd = null;
+            // restore remaining to 0 when completed
+            task.timerRemainingSeconds = 0;
+        }
         saveTasks();
     }
 };
@@ -173,10 +205,63 @@ const getFilteredTasks = () => {
     if (currentFilter === 'completed') {
         return tasks.filter(task => task.completed);
     } else if (currentFilter === 'active') {
-        return tasks.filter(task => !task.completed);
+        // Active should exclude tasks that are marked incomplete by timer expiry
+        return tasks.filter(task => !task.completed && !task.incomplete);
+    } else if (currentFilter === 'incomplete') {
+        return tasks.filter(task => task.incomplete === true);
     }
     return tasks;
 };
+
+// Start a task's timer
+const startTimer = (id) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task || task.completed || task.incomplete) return;
+    // if already running, do nothing
+    if (task.timerEnd) return;
+    // if remaining is 0 but original duration exists, reset remaining
+    if (!task.timerRemainingSeconds && task.timerSeconds) {
+        task.timerRemainingSeconds = task.timerSeconds;
+    }
+    if (task.timerRemainingSeconds > 0) {
+        task.timerEnd = Date.now() + task.timerRemainingSeconds * 1000;
+        saveTasks();
+    }
+};
+
+// Pause a task's timer
+const pauseTimer = (id) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task || task.completed || task.incomplete) return;
+    if (!task.timerEnd) return; // not running
+    const remaining = Math.max(0, Math.round((task.timerEnd - Date.now()) / 1000));
+    task.timerRemainingSeconds = remaining;
+    task.timerEnd = null;
+    saveTasks();
+};
+
+// Reset a task's timer to the original duration
+const resetTimer = (id) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    task.timerRemainingSeconds = task.timerSeconds || 0;
+    task.timerEnd = null;
+    task.incomplete = false;
+    saveTasks();
+};
+
+// Show a small toast message
+function showToast(message) {
+    let $toast = $('#__app_toast');
+    if ($toast.length === 0) {
+        $toast = $('<div id="__app_toast" class="toast"></div>');
+        $('body').append($toast);
+    }
+    $toast.text(message).addClass('show');
+    setTimeout(() => {
+        $toast.removeClass('show');
+    }, 3500);
+}
 
 // Get statistics
 const getStats = () => {
@@ -259,13 +344,34 @@ function renderTaskList() {
     // forEach loop - iterate through array
     filteredTasks.forEach((task) => {
         // Topic: DOM Manipulation - Create elements
+        // calculate timer display
+        let timerHtml = '';
+        if (task.timerSeconds && task.timerSeconds > 0) {
+            if (task.incomplete) {
+                timerHtml = `<span class="timer-display timer-expired" data-id="${task.id}">Expired</span>`;
+            } else if (task.timerEnd) {
+                // remaining seconds
+                const remaining = Math.max(0, Math.round((task.timerEnd - Date.now()) / 1000));
+                timerHtml = `<span class="timer-display" data-id="${task.id}">${formatTime(remaining)}</span>`;
+            } else {
+                // has duration but not running (paused or not started)
+                const rem = task.timerRemainingSeconds || task.timerSeconds;
+                timerHtml = `<span class="timer-display" data-id="${task.id}">${formatTime(rem)}</span>`;
+            }
+            // add controls
+            const isRunning = !!task.timerEnd && !task.incomplete && !task.completed;
+            const startBtn = `<button class="timer-start" data-id="${task.id}" ${isRunning || task.completed || task.incomplete ? 'disabled' : ''}>Start</button>`;
+            const pauseBtn = `<button class="timer-pause" data-id="${task.id}" ${!isRunning || task.completed || task.incomplete ? 'disabled' : ''}>Pause</button>`;
+            const resetBtn = `<button class="timer-reset" data-id="${task.id}" ${task.timerSeconds ? '' : 'disabled'}>Reset</button>`;
+            timerHtml = `<span class="timer-display-container">${timerHtml}<span class="timer-controls">${startBtn}${pauseBtn}${resetBtn}</span></span>`;
+        }
+
         const $li = $('<li>')
-            // DOM Manipulation: Add conditional class
             .addClass(task.completed ? 'completed' : '')
-            // DOM Manipulation: Set HTML with template literal
             .html(`
                 <input type="checkbox" class="task-checkbox" data-id="${task.id}" ${task.completed ? 'checked' : ''}>
                 <span class="task-text">${escapeHtml(task.text)}</span>
+                ${timerHtml}
                 <button class="delete-btn" data-id="${task.id}">Delete</button>
             `);
         
@@ -294,10 +400,30 @@ function renderTaskListNative() {
             li.classList.add('completed');
         }
         
+        // Native DOM: Build timer HTML
+        let timerHtml = '';
+        if (task.timerSeconds && task.timerSeconds > 0) {
+            if (task.incomplete) {
+                timerHtml = `<span class="timer-display timer-expired" data-id="${task.id}">Expired</span>`;
+            } else if (task.timerEnd) {
+                const remaining = Math.max(0, Math.round((task.timerEnd - Date.now()) / 1000));
+                timerHtml = `<span class="timer-display" data-id="${task.id}">${formatTime(remaining)}</span>`;
+            } else {
+                const rem = task.timerRemainingSeconds || task.timerSeconds;
+                timerHtml = `<span class="timer-display" data-id="${task.id}">${formatTime(rem)}</span>`;
+            }
+            const isRunning = !!task.timerEnd && !task.incomplete && !task.completed;
+            const startBtn = `<button class="timer-start" data-id="${task.id}" ${isRunning || task.completed || task.incomplete ? 'disabled' : ''}>Start</button>`;
+            const pauseBtn = `<button class="timer-pause" data-id="${task.id}" ${!isRunning || task.completed || task.incomplete ? 'disabled' : ''}>Pause</button>`;
+            const resetBtn = `<button class="timer-reset" data-id="${task.id}" ${task.timerSeconds ? '' : 'disabled'}>Reset</button>`;
+            timerHtml = `<span class="timer-display-container">${timerHtml}<span class="timer-controls">${startBtn}${pauseBtn}${resetBtn}</span></span>`;
+        }
+
         // Native DOM: Set HTML
         li.innerHTML = `
             <input type="checkbox" class="task-checkbox" data-id="${task.id}" ${task.completed ? 'checked' : ''}>
             <span class="task-text">${escapeHtml(task.text)}</span>
+            ${timerHtml}
             <button class="delete-btn" data-id="${task.id}">Delete</button>
         `;
         
@@ -347,6 +473,43 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Format seconds to MM:SS
+function formatTime(totalSeconds) {
+    const s = parseInt(totalSeconds, 10) || 0;
+    const minutes = Math.floor(s / 60);
+    const seconds = s % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+// Check timers periodically; mark tasks as incomplete when timer expires
+function checkTimers() {
+    const now = Date.now();
+    let changed = false;
+    for (const task of tasks) {
+        if (task.timerEnd && !task.completed && !task.incomplete) {
+            if (now >= task.timerEnd) {
+                task.incomplete = true;
+                // clear timerEnd to stop further updates
+                task.timerEnd = null;
+                // set remaining to 0
+                task.timerRemainingSeconds = 0;
+                changed = true;
+                // show toast notification
+                showToast(`Timer expired: ${task.text}`);
+            }
+        }
+    }
+    if (changed) {
+        saveTasks();
+        renderTaskList();
+        updateStats();
+        updateStorageStats();
+    } else {
+        // still refresh timer displays if no change so remaining values update
+        renderTaskList();
+    }
+}
+
 // Topic: Forms - Form submission handler
 // Arrow function - handles form submission
 const handleAddTask = () => {
@@ -375,6 +538,11 @@ const initApp = () => {
     renderTaskList();
     updateStats();
     updateStorageStats();
+    // Start timer checks every second to update remaining times and expire timers
+    // store interval id in window so it's easy to clear during testing if needed
+    if (!window.__taskTimerInterval) {
+        window.__taskTimerInterval = setInterval(checkTimers, 1000);
+    }
 };
 
 
@@ -411,6 +579,28 @@ $(document).ready(() => {
         deleteTask(id);
         renderTaskList();
         updateStats();
+        updateStorageStats();
+    });
+
+    // Timer control handlers (delegated)
+    $(document).on('click', '.timer-start', function() {
+        const id = parseInt($(this).data('id'));
+        startTimer(id);
+        renderTaskList();
+        updateStorageStats();
+    });
+
+    $(document).on('click', '.timer-pause', function() {
+        const id = parseInt($(this).data('id'));
+        pauseTimer(id);
+        renderTaskList();
+        updateStorageStats();
+    });
+
+    $(document).on('click', '.timer-reset', function() {
+        const id = parseInt($(this).data('id'));
+        resetTimer(id);
+        renderTaskList();
         updateStorageStats();
     });
 
