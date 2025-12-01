@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager - ES6 & jQuery Demo</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>📝 Task Manager</h1>
+        <p class="subtitle">Learn ES6 & jQuery Basics - DOM, Events, Forms & localStorage</p>
+
+        <form id="taskForm" class="input-section">
+            <input type="text" id="taskInput" name="task" placeholder="Enter a new task (3-200 chars)..." autocomplete="off" required>
+            <button type="button" id="addBtn">Add Task</button>
+        </form>
+
+        <div class="filter-section">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="active">Active</button>
+            <button class="filter-btn" data-filter="completed">Completed</button>
+        </div>
+
+        <ul id="taskList" class="task-list"></ul>
+
+        <div class="stats-section">
+            <div class="stat">
+                <span class="stat-label">Total Tasks:</span>
+                <span id="totalTasks" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Completed:</span>
+                <span id="completedTasks" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+                <span class="stat-label">Remaining:</span>
+                <span id="remainingTasks" class="stat-value">0</span>
+            </div>
+        </div>
+
+        <button id="clearBtn" class="clear-btn">Clear Completed</button>
+
+        <div class="debug-section">
+            <details>
+                <summary>🔧 Debug Info & Examples</summary>
+                <div class="debug-content">
+                    <p><strong>Try these in the browser console:</strong></p>
+                    <ul>
+                        <li><code>getStorageInfo()</code> - View all localStorage data</li>
+                        <li><code>logAllTasks()</code> - Log all tasks</li>
+                        <li><code>getTotalTasksCount()</code> - Get task count</li>
+                        <li><code>hasCompletedTasks()</code> - Check for completed tasks</li>
+                        <li><code>getTaskTexts()</code> - Get all task texts</li>
+                        <li><code>clearAllStorage()</code> - Clear all stored data</li>
+                    </ul>
+                    <p><strong>localStorage Stats:</strong></p>
+                    <p>🔍 Tasks stored: <span id="storageStats">0</span></p>
+                </div>
+            </details>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
